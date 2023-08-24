@@ -1,0 +1,117 @@
+version: '3.11'
+
+services:
+  consumerproject:
+    build: 
+      context: ./ConsumerProject
+    ports:
+    - "8000:8000"
+    command: >
+      sh -c "python manage.py wait_for_db &&
+             python manage.py runserver 0.0.0.0:8000"
+    environment:
+      - DEBUG=1
+      - DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1
+      - CELERY_BROKER=redis://redis:6379/0
+      - CELERY_BACKEND=db+postgresql://devuser:changeme@db/devdb
+      - DB_HOST=db
+      - DB_NAME=devdb
+      - DB_USER=devuser
+      - DB_PASS=changeme
+    depends_on:
+      - db
+      - rabbitmq
+      - redis
+    networks:
+      - network
+
+#docker-compose run --rm consumerproject sh
+#python manage.py consumemessage
+
+  producerproject:
+    build: 
+      context: ./ProducerProject
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_HOST=db
+      - DB_NAME=devdb
+      - DB_USER=devuser
+      - DB_PASS=changeme
+    depends_on:
+      - db
+      - rabbitmq
+      - redis
+    networks:
+      - network
+
+#docker-compose run --rm producerproject sh -c "python manage.py"
+#docker-compose run --rm producerproject sh -c "python manage.py makemigrations ProducerApp"
+
+  celery:
+    build: ./ConsumerProject
+    command: sh -c "celery -A ConsumerProject beat -l info"
+    depends_on:
+      - db
+      - consumerproject
+      - redis
+    networks:
+      - network
+
+  redis:
+    image: redis:latest
+    volumes:
+      - redis_volume_data:/data
+    networks:
+      - network
+
+#redis-cli
+#C:\Users\admin\Documents\code\python\django\Django-RabbitMQ\ConsumerProject> celery -A ConsumerApp worker -l info
+#C:\Users\admin\Documents\code\python\django\Django-RabbitMQ\ConsumerProject> celery -A ConsumerApp beat -l info  
+#python manage.py shell > from ConsumerApp.tasks *, from datetime import datetime \
+#task_one.delay()
+#task_two(datetime.now())
+
+  rabbitmq:
+    image: "rabbitmq:3-management"
+    ports:
+    - "5672:5672"
+    - "15672:15672"
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    networks:
+      - network
+
+  db:
+    image: postgres:13
+    restart: always
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=devdb
+      - POSTGRES_USER=devuser
+      - POSTGRES_PASSWORD=changeme
+    ports:
+      - "5432:5432"
+    networks:
+      - network
+
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+      - "81:81"
+    depends_on:
+      - consumerproject
+      - producerproject
+    networks:
+      - network
+
+volumes:
+  redis_volume_data:
+  rabbitmq:
+  dev-db-data:
+
+networks:
+  network:
